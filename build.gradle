@@ -1,0 +1,76 @@
+import jp.classmethod.aws.gradle.lambda.AWSLambdaMigrateFunctionTask
+
+// grab the AWS plugin
+buildscript {
+    repositories {
+        maven { url 'https://plugins.gradle.org/m2/' }
+    }
+    dependencies {
+        classpath 'jp.classmethod.aws:gradle-aws-plugin:0.21.1'
+    }
+}
+apply plugin: 'jp.classmethod.aws.lambda'
+
+// Apply the java plugin to add support for Java
+apply plugin: 'java'
+apply plugin: 'idea'
+
+// In this section you declare where to find the dependencies of your project
+repositories {
+    jcenter()
+}
+
+configurations {
+    provided
+    compile.extendsFrom provided
+}
+
+// In this section you declare the dependencies for your production and test code
+dependencies {
+    provided 'com.amazonaws:aws-lambda-java-core:1.0.0'
+    compile fileTree(dir: 'libs', include: ['*.jar'])
+    testCompile 'junit:junit:4.12'
+    testCompile 'com.fasterxml.jackson.core:jackson-databind:2.8.3'
+}
+
+jar {
+    dependsOn configurations.runtime
+    from {
+        (configurations.runtime - configurations.provided).collect {
+            it.isDirectory() ? it : zipTree(it)
+        }
+    }
+}
+
+aws {
+    profileName = 'default'
+    region = 'ap-southeast-2'
+}
+
+def doUpload(task, String name, String handler, String description = '') {
+    task.role = "arn:aws:iam::${aws.accountId}:role/lambda"
+    task.zipFile = jar.archivePath
+    task.memorySize = 128
+    task.timeout = 60
+    task.runtime = 'java8'
+    task.functionName = name
+    task.handler = "com.mannanlive.handler.${handler}::handleRequest"
+    task.description = description
+}
+
+// migrate or create the function to AWS
+task migrateTimeQuery(type: AWSLambdaMigrateFunctionTask, dependsOn: jar) {
+    doUpload delegate, 'query-date', 'TimeHandler', 'Get the current date plus any days.'
+}
+
+task migrateSpaceQuery(type: AWSLambdaMigrateFunctionTask, dependsOn: jar) {
+    doUpload delegate, 'query-space', 'SpaceHandler', 'Get the current space in the database.'
+}
+
+task refreshAll << {
+    println 'Migrated all tasks to AWS Lambda'
+}
+
+refreshAll.dependsOn {
+    tasks.findAll { task -> task.name.startsWith('migrate') }
+}
